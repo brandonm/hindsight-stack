@@ -32,8 +32,10 @@ services:
       retries: 10
 
   nothink-proxy:
+    # `make up` builds it locally; CI also publishes this same tag to GHCR, so
+    # `docker compose pull nothink-proxy` fetches the prebuilt image instead of building.
     build: ./nothink-proxy
-    image: hindsight-stack/nothink-proxy:latest
+    image: ghcr.io/brandonm/hindsight-stack/nothink-proxy:latest
     container_name: nothink-proxy
     restart: unless-stopped
     environment:

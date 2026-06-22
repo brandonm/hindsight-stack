@@ -113,6 +113,11 @@ make wipe       # ⚠️ down -v: deletes the DB volume (see below)
 
 **Updating:** bump `HINDSIGHT_IMAGE` / `VCHORD_IMAGE` in `.env` (or `docker compose pull`), then `make up`.
 
+**Proxy image:** CI publishes `nothink-proxy` to `ghcr.io/brandonm/hindsight-stack/nothink-proxy`
+(tags: `latest`, short-SHA, branch, and semver on `v*` tags) on every `main` push. `make up` builds it
+locally; to use the prebuilt image instead, `docker compose pull nothink-proxy`. (The GHCR package
+starts **private** — make it public in the repo's package settings, or `docker login ghcr.io`, to pull.)
+
 **Re-initialising:** Hindsight fixes the embedding **dimension and vector extension at
 schema-creation time** and can't change them in place. To switch embedding models/dims or the
 extension, `make wipe` (drops the volume) and start fresh — existing memories are lost, so
