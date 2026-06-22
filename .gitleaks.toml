@@ -1,0 +1,12 @@
+# Gitleaks config: default rules + allowlist this repo's documented placeholders.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Template placeholders and docs — not real secrets"
+paths = [
+  '''\.env\.example$''',   # the config template ships intentional placeholders
+]
+regexes = [
+  '''sk-noauth''',         # non-secret stand-in for backends that ignore auth
+]

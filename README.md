@@ -1,5 +1,7 @@
 # hindsight-stack
 
+[![CI](https://github.com/brandonm/hindsight-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/brandonm/hindsight-stack/actions/workflows/ci.yml)
+
 Self-hosted [Hindsight](https://github.com/vectorize-io/hindsight) memory server for
 [Hermes Agent](https://github.com/NousResearch/hermes-agent), wired to **your own**
 embedding + chat endpoints and a dedicated **VectorChord** Postgres — no third-party cloud.

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker compose config renders (dummy env satisfies the ${VAR:?} guards)
+        run: |
+          printf 'HINDSIGHT_API_KEY=ci\nPOSTGRES_PASSWORD=ci\nLLM_UPSTREAM_BASE_URL=https://example.invalid\nEMBEDDINGS_BASE_URL=https://example.invalid/v1\n' > .ci.env
+          docker compose --env-file .ci.env config -q
+          echo "compose config OK"
+
+      - name: nothink-proxy image builds
+        run: docker build -t nothink-proxy:ci ./nothink-proxy
+
+      - name: proxy Python compiles
+        run: python3 -m py_compile nothink-proxy/main.py
+
+      - name: smoke.sh shell checks
+        run: |
+          bash -n scripts/smoke.sh
+          shellcheck -S error scripts/smoke.sh
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so gitleaks scans every commit
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No GITLEAKS_LICENSE needed: this is a personal (non-org) repo.
