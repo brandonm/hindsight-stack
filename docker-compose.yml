@@ -3,7 +3,8 @@
 # Services:
 #   hindsight-db   - Postgres + VectorChord. vchord indexes 4096-dim vectors;
 #                    plain pgvector's HNSW index caps at 2000, which Qwen3-Embedding-8B (4096) exceeds.
-#   hindsight      - the memory server (extract -> embed -> index -> recall) on :8888, web UI on :9999.
+#   hindsight      - the memory server (extract -> embed -> index -> recall) on :8888.
+#                    Bearer-auth required (HINDSIGHT_API_KEY); the :9999 admin UI is opt-in. See SECURITY.md.
 #   nothink-proxy  - injects chat_template_kwargs.enable_thinking=false so Qwen3.6 skips <think>
 #                    (retains drop from ~10s to ~1-2s; Hindsight has no native way to pass this).
 #
@@ -40,7 +41,8 @@ services:
       UPSTREAM_BASE_URL: ${LLM_UPSTREAM_BASE_URL:?set LLM_UPSTREAM_BASE_URL in .env (host root, no /v1)}
 
   hindsight:
-    image: ${HINDSIGHT_IMAGE:-ghcr.io/vectorize-io/hindsight:latest}
+    # Pinned tag (not :latest) — bump deliberately after reviewing release notes. See SECURITY.md.
+    image: ${HINDSIGHT_IMAGE:-ghcr.io/vectorize-io/hindsight:0.8.3}
     container_name: hindsight
     restart: unless-stopped
     depends_on:
@@ -49,11 +51,23 @@ services:
       nothink-proxy:
         condition: service_healthy
     ports:
-      - "8888:8888"   # API — Hermes connects here
-      - "9999:9999"   # control-plane web UI (optional; remove to keep it internal)
+      # Bind the API to a specific interface via BIND_ADDR in .env (e.g. your Tailscale/WireGuard IP)
+      # so it is NOT served on every host interface. Default 0.0.0.0 = all interfaces (LAN-reachable).
+      - "${BIND_ADDR:-0.0.0.0}:8888:8888"   # API — Hermes connects here. PROTECT IT — see SECURITY.md.
+      # Control-plane web UI (:9999) is NOT published by default: it is an UNAUTHENTICATED admin
+      # surface over the same memory unless HINDSIGHT_CP_ACCESS_KEY is set. To use it, uncomment
+      # (prefer 127.0.0.1 + an SSH tunnel) AND set HINDSIGHT_CP_ACCESS_KEY in .env.
+      # - "127.0.0.1:9999:9999"
     environment:
       HINDSIGHT_API_HOST: "0.0.0.0"
       HINDSIGHT_API_PORT: "8888"
+
+      # --- AUTH: require Authorization: Bearer <key> on every API call (Hindsight is unauth by ---
+      # --- default). Configure the SAME key on the Hermes side. Generate: openssl rand -hex 32. ---
+      HINDSIGHT_API_TENANT_EXTENSION: "hindsight_api.extensions.builtin.tenant:ApiKeyTenantExtension"
+      HINDSIGHT_API_TENANT_API_KEY: ${HINDSIGHT_API_KEY:?set HINDSIGHT_API_KEY in .env (generate one with openssl rand -hex 32)}
+      # Only used if you publish the :9999 UI above; harmless when empty/unpublished.
+      HINDSIGHT_CP_ACCESS_KEY: ${HINDSIGHT_CP_ACCESS_KEY:-}
 
       # --- storage: the bundled vchord sidecar (reached by service name) ---
       HINDSIGHT_API_VECTOR_EXTENSION: "vchord"

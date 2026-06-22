@@ -10,7 +10,7 @@ byte on your infrastructure.
 ## Architecture
 
 ```
-Hermes Agent ──(memory provider, mode: local_external)──▶ hindsight  :8888  (web UI :9999)
+Hermes Agent ──(bearer-authed, mode: local_external)──▶ hindsight  :8888  (admin UI :9999 opt-in)
                                                             │
    embeddings ──▶ your llama-swap  /v1/embeddings  (Qwen3-Embedding-8B, 4096-dim)
    chat LLM   ──▶ nothink-proxy ──▶ your chat model /v1   (thinking disabled per-request)
@@ -37,24 +37,35 @@ Two endpoints **you** provide: an OpenAI-compatible `/v1/embeddings` and `/v1/ch
 ## Quick start
 
 ```bash
-cp .env.example .env       # then EDIT it — placeholder URLs boot fine but fail at the first LLM/embed call
-make up                    # build + start (or: docker compose up -d --build)
-make smoke                 # validate end-to-end (needs jq)
+cp .env.example .env
+# Edit .env — at minimum:
+#   HINDSIGHT_API_KEY   ->  openssl rand -hex 32   (REQUIRED — Hindsight is unauthenticated by default)
+#   POSTGRES_PASSWORD, EMBEDDINGS_BASE_URL, LLM_UPSTREAM_BASE_URL, model ids
+make up   # refuses to start until HINDSIGHT_API_KEY is set
+HINDSIGHT_API_KEY="$(grep -E '^HINDSIGHT_API_KEY=' .env | cut -d= -f2-)" make smoke   # auth-enforced e2e (needs jq)
 ```
 
-`make smoke` should print `failed_operations: 0` at the stats step and end with a non-empty `recall` result.
+`make smoke` confirms auth is enforced (401 without a token), prints `failed_operations: 0`, and ends with a
+non-empty `recall`.
+
+> ⚠️ **Read [SECURITY.md](SECURITY.md) before exposing this.** The API serves personal memory and is
+> unauthenticated by default; this repo turns auth on, but **you** must still set a strong key and isolate
+> the network (the API must be reachable from the Hermes host but nothing else).
 
 ## Configuration (`.env`)
 
 | Var | What |
 |-----|------|
+| `HINDSIGHT_API_KEY` | **REQUIRED.** Bearer token enforced on every API call. `openssl rand -hex 32`. Same value on the Hermes side. |
 | `POSTGRES_PASSWORD` | Hindsight DB password. **URL-safe** — it goes into a `postgresql://` URL. |
 | `EMBEDDINGS_BASE_URL` | Your `/v1` embeddings endpoint (Qwen3-Embedding-8B). **Include `/v1`.** |
 | `EMBEDDINGS_MODEL` | Embedding model id (default `qwen3-embedding-8b`). |
 | `EMBEDDINGS_API_KEY` | Any non-empty string if your backend ignores auth. |
 | `LLM_UPSTREAM_BASE_URL` | Chat host **root, no `/v1`** (the proxy adds the path). |
 | `LLM_MODEL` | Chat model id (default `qwen3.6-35b-a3b`). |
-| `HINDSIGHT_IMAGE` / `VCHORD_IMAGE` | Image pins — bump to update. |
+| `BIND_ADDR` | *(optional)* Interface to bind `:8888` to (e.g. your Tailscale IP). Unset = all interfaces. |
+| `HINDSIGHT_CP_ACCESS_KEY` | *(optional)* Admin-UI key — only if you publish `:9999` (off by default). |
+| `HINDSIGHT_IMAGE` / `VCHORD_IMAGE` | Image pins (default `hindsight:0.8.3`) — bump deliberately. |
 
 ## Wire up Hermes Agent
 
@@ -68,10 +79,21 @@ then in `~/.hermes/config.yaml`:
 memory:
   provider: hindsight
   hindsight:
-    mode: local_external           # run our own server (not Hindsight cloud)
-    api_url: "http://<this-box-ip>:8888"
+    mode: local_external               # run our own server (not Hindsight cloud)
+    api_url: "https://<this-box-ip>:8888"  # https if fronted by TLS; http only inside a VPN tunnel
+    api_key: "${HINDSIGHT_API_KEY}"    # MUST match the server's HINDSIGHT_API_KEY, or every call 401s
     bank_id: hermes
 ```
+
+## Security
+
+The Hindsight API serves **personal memory** and is **unauthenticated by default** — and because
+Hermes is on another host, `:8888` has to be reachable off-box. This repo defaults to **auth-on**
+(`make up` won't start without `HINDSIGHT_API_KEY`), keeps the admin UI unpublished, and pins the
+image. **You still must** set a strong key on both ends and isolate the network (Tailscale/WireGuard
+recommended, or a firewall allowlist). The sneaky risk isn't theft but **memory poisoning** — planted
+"facts" your agent later trusts. Full threat model, findings, and the hardening checklist are in
+**[SECURITY.md](SECURITY.md)** — read it before exposing the port.
 
 ## Operations
 
@@ -94,8 +116,9 @@ extension, `make wipe` (drops the volume) and start fresh — existing memories 
 ```
 docker-compose.yml      three services, all config via ${...} from .env
 .env.example            copy to .env
+SECURITY.md             threat model + hardening checklist — read before exposing
 init/01-vchord.sql      CREATE EXTENSION vchord CASCADE (runs on first DB init)
 nothink-proxy/          FastAPI proxy that disables Qwen3 thinking
-scripts/smoke.sh        end-to-end validation
+scripts/smoke.sh        auth-enforced end-to-end validation
 Makefile                common ops — run `make help` to list targets
 ```
