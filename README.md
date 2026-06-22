@@ -74,15 +74,20 @@ On the Hermes host:
 ```bash
 hermes config set memory.provider hindsight
 ```
-then in `~/.hermes/config.yaml`:
+settings go in `~/.hermes/config.yaml`:
 ```yaml
 memory:
   provider: hindsight
   hindsight:
     mode: local_external               # run our own server (not Hindsight cloud)
     api_url: "https://<this-box-ip>:8888"  # https if fronted by TLS; http only inside a VPN tunnel
-    api_key: "${HINDSIGHT_API_KEY}"    # MUST match the server's HINDSIGHT_API_KEY, or every call 401s
     bank_id: hermes
+```
+and the bearer token — a secret — goes in `~/.hermes/.env` (the plugin reads `HINDSIGHT_API_KEY`
+directly and sends `Authorization: Bearer <key>` in every mode; verified in the plugin source):
+```bash
+# ~/.hermes/.env
+HINDSIGHT_API_KEY=<the SAME value as the server's HINDSIGHT_API_KEY>   # or every call 401s
 ```
 
 ## Security

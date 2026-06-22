@@ -77,15 +77,21 @@ make smoke   # runs the auth-enforced end-to-end check (HINDSIGHT_API_KEY must b
 
 ## Wiring the key into Hermes
 
-In `~/.hermes/config.yaml`, the hindsight provider must send the bearer token:
+The hindsight plugin sends `Authorization: Bearer <key>` in every mode (verified in the plugin
+`__init__.py`), reading the key from the env var `HINDSIGHT_API_KEY` (or a config `apiKey`/`api_key`).
+Put the secret in `~/.hermes/.env` and the settings in `~/.hermes/config.yaml`:
 
+```bash
+# ~/.hermes/.env  (secrets)
+HINDSIGHT_API_KEY=<same value as the Hindsight host's HINDSIGHT_API_KEY>
+```
 ```yaml
+# ~/.hermes/config.yaml  (settings)
 memory:
   provider: hindsight
   hindsight:
     mode: local_external
     api_url: "https://<box>:8888"   # https if you front it with TLS; http only inside a VPN tunnel
-    api_key: "${HINDSIGHT_API_KEY}"  # same value as on the Hindsight host
     bank_id: hermes
 ```
 
