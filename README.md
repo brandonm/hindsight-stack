@@ -118,6 +118,9 @@ make wipe       # ⚠️ down -v: deletes the DB volume (see below)
 locally; to use the prebuilt image instead, `docker compose pull nothink-proxy`. (The GHCR package
 starts **private** — make it public in the repo's package settings, or `docker login ghcr.io`, to pull.)
 
+**Build-free / Portainer / NAS deploys** (prebuilt image + explicit host bind-mount paths) — see
+[`examples/docker-compose.prebuilt.yml`](examples/docker-compose.prebuilt.yml).
+
 **Re-initialising:** Hindsight fixes the embedding **dimension and vector extension at
 schema-creation time** and can't change them in place. To switch embedding models/dims or the
 extension, `make wipe` (drops the volume) and start fresh — existing memories are lost, so
@@ -126,7 +129,8 @@ extension, `make wipe` (drops the volume) and start fresh — existing memories 
 ## Layout
 
 ```
-docker-compose.yml      three services, all config via ${...} from .env
+docker-compose.yml      three services, all config via ${...} from .env (builds the proxy, named volume)
+examples/               deploy variants — e.g. docker-compose.prebuilt.yml (GHCR image + bind mounts)
 .env.example            copy to .env
 SECURITY.md             threat model + hardening checklist — read before exposing
 init/01-vchord.sql      CREATE EXTENSION vchord CASCADE (runs on first DB init)

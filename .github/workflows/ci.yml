@@ -20,7 +20,8 @@ jobs:
         run: |
           printf 'HINDSIGHT_API_KEY=ci\nPOSTGRES_PASSWORD=ci\nLLM_UPSTREAM_BASE_URL=https://example.invalid\nEMBEDDINGS_BASE_URL=https://example.invalid/v1\n' > .ci.env
           docker compose --env-file .ci.env config -q
-          echo "compose config OK"
+          docker compose -f examples/docker-compose.prebuilt.yml --env-file .ci.env config -q
+          echo "compose config OK (root + examples/)"
 
       - name: nothink-proxy image builds
         run: docker build -t nothink-proxy:ci ./nothink-proxy

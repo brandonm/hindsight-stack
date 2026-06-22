@@ -1,0 +1,77 @@
+# Example deploy variant: prebuilt image + bind mounts
+#
+# Functionally identical to the root ../docker-compose.yml, but a common real-world shape:
+#   - pulls the CI-published nothink-proxy image from GHCR (no local `build:`)
+#   - bind-mounts the DB + init script to explicit HOST paths (instead of a named volume)
+#   - inlines the NON-secret endpoint URLs; secrets still come from .env / the orchestrator
+#
+# Adjust to your host: the /srv/hindsight/* paths and the *.example.com endpoint URLs.
+# Secrets (POSTGRES_PASSWORD, HINDSIGHT_API_KEY, LLM_UPSTREAM_BASE_URL) come from .env — or, if you
+# deploy via Portainer, from the stack's Environment variables (Portainer does NOT read a .env file).
+# Read ../SECURITY.md before exposing :8888 (the API is unauthenticated by default; this enables auth).
+#
+# Usage:  docker compose -f examples/docker-compose.prebuilt.yml up -d
+
+services:
+  hindsight-db:
+    image: ghcr.io/tensorchord/vchord-postgres:pg17-v1.1.1
+    container_name: hindsight-db
+    restart: unless-stopped
+    command: ["postgres", "-c", "shared_preload_libraries=vchord"]
+    environment:
+      POSTGRES_USER: hindsight
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: hindsight
+    volumes:
+      - /srv/hindsight/db:/var/lib/postgresql/data
+      - /srv/hindsight/init-vector.sql:/docker-entrypoint-initdb.d/init-vector.sql:ro   # CREATE EXTENSION vchord CASCADE
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hindsight -d hindsight"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nothink-proxy:
+    image: ghcr.io/brandonm/hindsight-stack/nothink-proxy:latest   # CI-published; no build step
+    container_name: nothink-proxy
+    restart: unless-stopped
+    environment:
+      # Chat host ROOT, no /v1 — the proxy mirrors the request path onto it.
+      UPSTREAM_BASE_URL: ${LLM_UPSTREAM_BASE_URL:?set LLM_UPSTREAM_BASE_URL in .env (host root, no /v1)}
+
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:0.8.3
+    container_name: hindsight
+    restart: unless-stopped
+    depends_on:
+      hindsight-db:
+        condition: service_healthy
+      nothink-proxy:
+        condition: service_started
+    ports:
+      - "8888:8888"
+      # - "127.0.0.1:9999:9999"   # admin UI: unauthenticated unless HINDSIGHT_CP_ACCESS_KEY is set — keep internal
+    environment:
+      HINDSIGHT_API_HOST: "0.0.0.0"
+      HINDSIGHT_API_PORT: "8888"
+
+      # auth — Hindsight is unauthenticated by default
+      HINDSIGHT_API_TENANT_EXTENSION: "hindsight_api.extensions.builtin.tenant:ApiKeyTenantExtension"
+      HINDSIGHT_API_TENANT_API_KEY: ${HINDSIGHT_API_KEY:?set HINDSIGHT_API_KEY in .env}
+
+      # storage -> the vchord sidecar (vchord, NOT pgvector — 4096 dims exceed pgvector's 2000 index cap)
+      HINDSIGHT_API_VECTOR_EXTENSION: "vchord"
+      HINDSIGHT_API_DATABASE_URL: "postgresql://hindsight:${POSTGRES_PASSWORD}@hindsight-db:5432/hindsight"
+      HINDSIGHT_API_DATABASE_SCHEMA: "public"
+
+      # embeddings -> your Qwen3-Embedding-8B endpoint (native 4096; do NOT set a dims override)
+      HINDSIGHT_API_EMBEDDINGS_PROVIDER: "openai"
+      HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL: "https://llm-gen.example.com/v1"   # include /v1
+      HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL: "qwen3-embedding-8b"
+      HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY: "sk-noauth"
+
+      # LLM -> THROUGH the no-think proxy (not directly at the chat host, or thinking stays on)
+      HINDSIGHT_API_LLM_PROVIDER: "openai"
+      HINDSIGHT_API_LLM_BASE_URL: "http://nothink-proxy:8000/v1"
+      HINDSIGHT_API_LLM_MODEL: "qwen3.6-35b-a3b"
+      HINDSIGHT_API_LLM_API_KEY: "sk-noauth"
