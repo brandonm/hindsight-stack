@@ -1,0 +1,11 @@
+# Secrets / local config — NEVER commit. (.env.example is tracked.)
+.env
+*.env
+!.env.example
+
+# Python proxy
+__pycache__/
+*.pyc
+
+# Local DB dumps / backups
+*.sql.gz

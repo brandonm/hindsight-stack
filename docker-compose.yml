@@ -1,0 +1,76 @@
+# Self-hosted Hindsight memory stack for Hermes Agent.
+#
+# Services:
+#   hindsight-db   - Postgres + VectorChord. vchord indexes 4096-dim vectors;
+#                    plain pgvector's HNSW index caps at 2000, which Qwen3-Embedding-8B (4096) exceeds.
+#   hindsight      - the memory server (extract -> embed -> index -> recall) on :8888, web UI on :9999.
+#   nothink-proxy  - injects chat_template_kwargs.enable_thinking=false so Qwen3.6 skips <think>
+#                    (retains drop from ~10s to ~1-2s; Hindsight has no native way to pass this).
+#
+# You provide (in .env): an OpenAI-compatible /v1/embeddings endpoint (Qwen3-Embedding-8B, 4096-dim)
+# and an OpenAI-compatible /v1/chat/completions endpoint (your chat model).
+
+services:
+  hindsight-db:
+    image: ${VCHORD_IMAGE:-ghcr.io/tensorchord/vchord-postgres:pg17-v1.1.1}
+    container_name: hindsight-db
+    restart: unless-stopped
+    # vchord must be preloaded before CREATE EXTENSION (Hindsight runs it on first boot).
+    command: ["postgres", "-c", "shared_preload_libraries=vchord"]
+    environment:
+      POSTGRES_USER: hindsight
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (keep it URL-safe — it goes in a connection URL)}
+      POSTGRES_DB: hindsight
+    volumes:
+      - hindsight-pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro   # runs only when the volume is empty
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hindsight -d hindsight"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nothink-proxy:
+    build: ./nothink-proxy
+    image: hindsight-stack/nothink-proxy:latest
+    container_name: nothink-proxy
+    restart: unless-stopped
+    environment:
+      # Host root of your chat endpoint, WITHOUT /v1 (the proxy mirrors the full request path).
+      UPSTREAM_BASE_URL: ${LLM_UPSTREAM_BASE_URL:?set LLM_UPSTREAM_BASE_URL in .env (host root, no /v1)}
+
+  hindsight:
+    image: ${HINDSIGHT_IMAGE:-ghcr.io/vectorize-io/hindsight:latest}
+    container_name: hindsight
+    restart: unless-stopped
+    depends_on:
+      hindsight-db:
+        condition: service_healthy
+      nothink-proxy:
+        condition: service_healthy
+    ports:
+      - "8888:8888"   # API — Hermes connects here
+      - "9999:9999"   # control-plane web UI (optional; remove to keep it internal)
+    environment:
+      HINDSIGHT_API_HOST: "0.0.0.0"
+      HINDSIGHT_API_PORT: "8888"
+
+      # --- storage: the bundled vchord sidecar (reached by service name) ---
+      HINDSIGHT_API_VECTOR_EXTENSION: "vchord"
+      HINDSIGHT_API_DATABASE_URL: "postgresql://hindsight:${POSTGRES_PASSWORD}@hindsight-db:5432/hindsight"
+      HINDSIGHT_API_DATABASE_SCHEMA: "public"
+
+      # --- embeddings: your llama-swap Qwen3-Embedding-8B (native 4096; do NOT set a dims override) ---
+      HINDSIGHT_API_EMBEDDINGS_PROVIDER: "openai"
+      HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL: ${EMBEDDINGS_BASE_URL:?set EMBEDDINGS_BASE_URL in .env (include /v1)}
+      HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL: ${EMBEDDINGS_MODEL:-qwen3-embedding-8b}
+      HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY: ${EMBEDDINGS_API_KEY:-sk-noauth}
+
+      # --- LLM: routed through the no-think proxy -> your chat model with thinking disabled ---
+      HINDSIGHT_API_LLM_PROVIDER: "openai"
+      HINDSIGHT_API_LLM_BASE_URL: "http://nothink-proxy:8000/v1"
+      HINDSIGHT_API_LLM_MODEL: ${LLM_MODEL:-qwen3.6-35b-a3b}
+      HINDSIGHT_API_LLM_API_KEY: "sk-noauth"
+
+volumes:
+  hindsight-pgdata:
